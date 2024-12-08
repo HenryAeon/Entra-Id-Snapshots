@@ -1,0 +1,45 @@
+# These are Kusto Query Language Queries to run in Microsoft Sentinel
+# to help the participants verify they have access to the data sets
+
+#####################################
+## Ensure group 1 and 2 have access to the following data sets
+#####################################
+
+AuditLogs
+| take 10
+
+SigninLogs
+| take 10
+
+#####################################
+## Ensure only group 2 have access to the following additional data sets
+#####################################
+_GetWatchlist('PreExploit_EntraSnapshot')
+
+_GetWatchlist('PostExploit_EntraSnapshot') 
+
+#####################################
+## KQL queries for solution
+#####################################
+//get a list of new users after the exploit, will help narrow investigation to a handful of users
+_GetWatchlist('PreExploit_EntraSnapshot')
+| join kind = rightanti _GetWatchlist('PostExploit_EntraSnapshot') on TargetId
+| project-reorder TargetUPN
+
+//lookup for signins for the suspected users. This will help identify the locations and apps accessed.
+let newusers = pack_array( "PeytonMayor","EdgarVilInLake_yah00.com#EXT#","MegaJohn","EdgarVilInLake","WaldMagio");
+SigninLogs
+| where UserPrincipalName has_any (newusers)
+| where TimeGenerated >= ago(5h)
+| project-reorder  TimeGenerated, UserPrincipalName, AppDisplayName, ResourceDisplayName, Location
+
+//Provide the activity logs that all users performed during the investigation window
+AuditLogs
+| where TimeGenerated between (todatetime('2024-12-02T23:00Z') .. todatetime('2024-12-02T23:59Z') ) //update the times to your simulated times
+| extend displayName_ = tostring(parse_json(tostring(InitiatedBy.app)).displayName)
+| extend userPrincipalName_ = tostring(parse_json(tostring(InitiatedBy.user)).userPrincipalName)
+| extend InitiatedBy = coalesce( displayName_, userPrincipalName_)
+| extend target_displayName_ = tostring(TargetResources[0].displayName)
+| extend target_userPrincipalName_ = tostring(TargetResources[0].userPrincipalName)
+| project-reorder TimeGenerated, InitiatedBy, OperationName, target_userPrincipalName_, target_displayName_, TargetResources
+
